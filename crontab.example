@@ -1,0 +1,5 @@
+# 每天早上8点运行阿森纳每日播报
+# OpenClaw 负责调度时，可直接执行：
+# cd "/Users/vavavoom/Vibe coding/auto-podcast-skill" && /usr/bin/python3 main.py
+# 如果仍用 crontab，可添加以下行：
+0 8 * * * cd "/Users/vavavoom/Vibe coding/auto-podcast-skill" && /usr/bin/python3 main.py --run-id "$(date +\%Y\%m\%d_\%H\%M\%S)" >> output/cron.log 2>&1

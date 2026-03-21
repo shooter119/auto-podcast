@@ -1,0 +1,123 @@
+team:
+  name: "Arsenal"
+  name_cn: "阿森纳"
+  league: "Premier League"
+
+host:
+  name: "萨卡"
+  style: "年轻球迷视角，轻松幽默，偶尔吐槽，网络化表达"
+  catchphrases:
+    - "各位枪迷"
+    - "话说回来"
+    - "这波属于是"
+  personality: |
+    你叫萨卡，是一个阿森纳铁杆球迷，也是播客「北伦敦24小时」的主播。
+    你看球多年，表达要像朋友聊天，不像新闻联播。
+
+keywords:
+  arsenal_core:
+    queries:
+      - "Arsenal FC latest"
+      - "Arsenal match report"
+      - "Arsenal injury news"
+      - "阿森纳 最新消息"
+    max_results: 8
+    final_limit: 10
+    restrict_to_sources: false
+  rivals:
+    queries:
+      - "Manchester City Premier League"
+      - "Liverpool Premier League"
+      - "Chelsea Premier League"
+      - "Tottenham Premier League"
+    max_results: 6
+    final_limit: 4
+    restrict_to_sources: true
+  league:
+    queries:
+      - "Premier League standings results"
+      - "Champions League football"
+      - "football transfer news"
+    max_results: 5
+    final_limit: 4
+    restrict_to_sources: true
+
+sources:
+  tier5:
+    label: "官方（核心事实）"
+    domains:
+      - "arsenal.com"
+      - "premierleague.com"
+      - "uefa.com"
+      - "fifa.com"
+  tier4:
+    label: "高质量媒体"
+    domains:
+      - "theathletic.com"
+      - "bbc.co.uk"
+      - "skysports.com"
+      - "theguardian.com"
+      - "telegraph.co.uk"
+      - "independent.co.uk"
+  tier3:
+    label: "足球专业媒体"
+    domains:
+      - "goal.com"
+      - "espn.com"
+      - "football.london"
+      - "90min.com"
+      - "arseblog.com"
+      - "transfermarkt.com"
+
+tavily:
+  api_key: "${TAVILY_API_KEY}"
+  max_results_per_keyword: 6
+
+openclaw:
+  gateway_url: "http://127.0.0.1:18789"
+  model: "openclaw:main"
+  agent_id: "main"
+  auth_token: "${OPENCLAW_GATEWAY_TOKEN}"
+  timeout_seconds: 300
+  temperature: 0.5
+  user: "auto-podcast"
+
+tts:
+  voice: "zh-CN-YunxiNeural"
+  rate: "+5%"
+
+r2:
+  account_id: "${R2_ACCOUNT_ID}"
+  access_key_id: "${R2_ACCESS_KEY_ID}"
+  secret_access_key: "${R2_SECRET_ACCESS_KEY}"
+  bucket: "arsenal-podcast"
+  public_url: "${R2_PUBLIC_URL}"
+
+podcast:
+  title: "北伦敦24小时"
+  description: "每天花十几分钟，跟萨卡一起聊聊阿森纳和英超那些事儿。"
+  author: "萨卡"
+  language: "zh-cn"
+  max_episodes: 90
+
+content:
+  target_duration_minutes: 13
+  words_per_minute: 280
+  min_words: 3400
+  max_words: 4200
+  team_ratio: 0.7
+  tail_max_items: 5
+  tail_max_minutes: 3
+  main_feed_limit: 8
+  match_feed_limit: 4
+  transfer_feed_limit: 3
+  league_feed_limit: 5
+  qa_retry_limit: 1
+
+dedup:
+  cooldown_match_hours: 48
+  cooldown_transfer_hours: 36
+  cooldown_news_hours: 18
+  similarity_threshold: 0.86
+  fallback_keep: 2
+  history_file: "output/history.json"
