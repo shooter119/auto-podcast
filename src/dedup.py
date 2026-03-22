@@ -56,6 +56,13 @@ def deduplicate(articles: list[dict[str, Any]], config: dict[str, Any]) -> list[
             "fingerprint": normalized["fingerprint"],
             "source_domain": normalized["source_domain"],
             "event_type": normalized["event_type"],
+            # TTL（秒）：按类型区分，过期后不再用于去重
+            "ttl": {
+                "match": 72 * 3600,
+                "transfer": 48 * 3600,
+                "injury": 24 * 3600,
+                "news": 18 * 3600,
+            }.get(normalized["event_type"], 18 * 3600),
         }
         new_entries.append(new_entry)
         active_history.append(new_entry)
@@ -89,9 +96,29 @@ def _find_duplicate_reason(
     similarity_threshold: float,
     now: datetime,
 ) -> str | None:
+    """
+    判断文章是否重复。
+    改为每条记录自己的 TTL（从 entry 的 ttl 字段读取），
+    替代旧的全局 cooldown 逻辑。
+    旧格式 entry 无 ttl 字段则降级用 cooldown_hours。
+    """
     for entry in history:
         entry_time = _parse_timestamp(entry.get("timestamp"))
-        if now - entry_time > timedelta(hours=cooldown_hours):
+
+        # 获取该条记录自己的 TTL（秒），没有则降级用 cooldown_hours
+        entry_ttl_seconds = entry.get("ttl")
+        if entry_ttl_seconds is None:
+            # 旧格式：没有 ttl 字段，用 event_type 推断
+            event_type = entry.get("event_type", "news")
+            entry_ttl_seconds = {
+                "match": 72 * 3600,
+                "transfer": 48 * 3600,
+                "injury": 24 * 3600,
+                "news": 18 * 3600,
+            }.get(event_type, 18 * 3600)
+
+        entry_ttl_hours = entry_ttl_seconds / 3600
+        if now - entry_time > timedelta(hours=entry_ttl_hours):
             continue
         if entry.get("fingerprint") == article["fingerprint"]:
             return "事件指纹重复"
@@ -107,14 +134,42 @@ def _find_duplicate_reason(
 
 
 def _load_history(history_path: Path) -> list[dict[str, Any]]:
+    """
+    加载历史记录，同时清理已过期条目。
+    每条记录的 TTL 由其 event_type 决定，过期则丢弃。
+    """
     if history_path.exists():
         try:
             with open(history_path, encoding="utf-8") as handle:
                 data = json.load(handle)
-                return data if isinstance(data, list) else []
+            entries = data if isinstance(data, list) else []
         except (json.JSONDecodeError, IOError):
             logger.warning("历史记录文件损坏，重新创建")
-    return []
+            return []
+
+    # 按 TTL 过滤（清理过期条目）
+    now = datetime.now(timezone.utc)
+    EVENT_TTL = {
+        "match": 72 * 3600,
+        "transfer": 48 * 3600,
+        "injury": 24 * 3600,
+        "news": 18 * 3600,
+    }
+
+    def is_valid(entry: dict[str, Any]) -> bool:
+        entry_ttl = entry.get("ttl")
+        if entry_ttl is None:
+            # 旧格式：用 event_type 推断
+            entry_ttl = EVENT_TTL.get(entry.get("event_type", "news"), 18 * 3600)
+        entry_time = _parse_timestamp(entry.get("timestamp"))
+        return (now - entry_time).total_seconds() <= entry_ttl
+
+    valid_entries = [e for e in entries if is_valid(e)]
+    removed = len(entries) - len(valid_entries)
+    if removed > 0:
+        logger.info(f"历史记录: 清理 {removed} 条过期条目，剩余 {len(valid_entries)} 条")
+
+    return valid_entries
 
 
 def _save_history(history: list[dict[str, Any]], history_path: Path) -> None:
