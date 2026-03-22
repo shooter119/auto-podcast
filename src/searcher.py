@@ -156,7 +156,7 @@ def _tavily_search_cached(
             "cached_at": datetime.now(timezone.utc).isoformat(),
             "ttl": ttl,
         }
-        cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        cache_file.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         logger.warning("缓存写入失败: %s", cache_key)
 
