@@ -20,6 +20,10 @@ QA_BANNED_TERMS = {
 
 
 def generate_script(articles: list[dict[str, Any]], config: dict[str, Any]) -> str:
+    # 球员名称标准化（英文/昵称 → 标准中文名）
+    from src.arsenal_knowledge import normalize_articles
+    articles = normalize_articles(articles)
+
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     content_config = config.get("content", {})
     host_config = config.get("host", {})

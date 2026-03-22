@@ -5,8 +5,10 @@
 """
 
 from pathlib import Path
+import re
 import json
 import logging
+from typing import Any
 
 logger = logging.getLogger("auto-podcast")
 
@@ -43,7 +45,7 @@ DEFAULT_KNOWLEDGE = {
             "position": "右边锋/左边锋"
         },
         "martin_odegaard": {
-            "en": ["Martin Ødegaard", " Odegaard"],
+            "en": ["Martin Ødegaard", "Ødegaard", "Odegaard"],
             "cn": "厄德高",
             "nicknames": ["厄德高", "奥德高"],
             "position": "进攻型中场"
@@ -225,10 +227,10 @@ def get_player_cn_name(en_name_or_nickname: str, knowledge: dict = None) -> str 
     return None
 
 
-def build_name_aliases(knowledge: dict = None) -> dict[str, str]:
+def build_alias_index(knowledge: dict = None) -> dict[str, str]:
     """
-    构建所有名称→中文名的映射表（用于快速查找）
-    返回 {"saka": "萨卡", "萨卡": "萨卡", "Bukayo Saka": "萨卡", ...}
+    构建所有别名→中文名的倒排索引，用于文本批量替换。
+    返回 {"saka": "萨卡", "bukayo saka": "萨卡", "萨卡": "萨卡", ...}
     """
     if knowledge is None:
         knowledge = load_arsenal_knowledge()
@@ -237,10 +239,62 @@ def build_name_aliases(knowledge: dict = None) -> dict[str, str]:
     for player_key, player_data in knowledge.get("player_names", {}).items():
         cn = player_data["cn"]
         for en in player_data.get("en", []):
-            aliases[en.lower()] = cn
+            en_lower = en.lower().strip()
+            if en_lower:
+                aliases[en_lower] = cn
         for nickname in player_data.get("nicknames", []):
-            aliases[nickname.lower()] = cn
+            nick_lower = nickname.lower().strip()
+            if nick_lower:
+                aliases[nick_lower] = cn
+        # 中文名本身也加入
+        cn_lower = cn.lower()
+        aliases[cn_lower] = cn
     return aliases
+
+
+def normalize_entities(text: str, knowledge: dict = None) -> str:
+    """
+    将文本中出现的所有球员英文名/昵称替换为标准中文名。
+    使用最长匹配优先，避免短名称覆盖长名称的部分匹配。
+    """
+    if not text:
+        return text
+
+    if knowledge is None:
+        knowledge = load_arsenal_knowledge()
+
+    alias_index = build_alias_index(knowledge)
+    if not alias_index:
+        return text
+
+    # 按长度降序排列，确保"Declan Rice"优先于"Rice"被替换
+    sorted_aliases = sorted(alias_index.items(), key=lambda x: -len(x[0]))
+
+    for alias, cn_name in sorted_aliases:
+        if not alias:
+            continue
+        # 整个词匹配，不做子串替换
+        pattern = re.compile(r'\b' + re.escape(alias) + r'\b', re.IGNORECASE)
+        text = pattern.sub(cn_name, text)
+
+    return text
+
+
+def normalize_article(article: dict[str, Any], knowledge: dict = None) -> dict[str, Any]:
+    """对单篇文章的标题、摘要、正文做球员名标准化，返回新字典（不修改原对象）"""
+    if knowledge is None:
+        knowledge = load_arsenal_knowledge()
+
+    normalized = dict(article)
+    for field in ("title", "summary", "content"):
+        if article.get(field):
+            normalized[field] = normalize_entities(article[field], knowledge)
+    return normalized
+
+
+def normalize_articles(articles: list[dict[str, Any]], knowledge: dict = None) -> list[dict[str, Any]]:
+    """对文章列表中所有文章的球员名做标准化"""
+    return [normalize_article(a, knowledge) for a in articles]
 
 
 # 初始化时保存默认记忆文件
