@@ -60,6 +60,36 @@ def main():
     context = create_run_context(OUTPUT_DIR, args.run_id)
     setup_logging(context.log_path)
 
+    # 启动时清理过期缓存（后台异步，不阻塞主流程）
+    import threading
+    def _cleanup_cache():
+        try:
+            from src.searcher import _keyword_ttl
+            import hashlib, json, logging
+            from pathlib import Path
+            from datetime import datetime, timezone
+            cache_dir = Path("output/cache/search")
+            if cache_dir.exists():
+                count = 0
+                for f in cache_dir.glob("*.json"):
+                    try:
+                        entry = json.loads(f.read_text(encoding="utf-8"))
+                        cached_at = datetime.fromisoformat(entry["cached_at"])
+                        if cached_at.tzinfo is None:
+                            cached_at = cached_at.replace(tzinfo=timezone.utc)
+                        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+                        if age > entry.get("ttl", 0):
+                            f.unlink(missing_ok=True)
+                            count += 1
+                    except Exception:
+                        f.unlink(missing_ok=True)
+                        count += 1
+                if count > 0:
+                    logging.getLogger("auto-podcast").info(f"缓存清理: 删除 {count} 个过期文件")
+        except Exception:
+            pass
+    threading.Thread(target=_cleanup_cache, daemon=True).start()
+
     logger.info("=== 北伦敦24小时 · 播客生成开始 ===")
     logger.info("run_id=%s", context.run_id)
 

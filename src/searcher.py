@@ -57,6 +57,22 @@ def _collect_keyword_specs(config: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _keyword_ttl(keyword: str) -> int:
+    """根据关键词判断缓存 TTL（秒）"""
+    kw = keyword.lower()
+    if any(x in kw for x in ["injury", "fitness", "timber", "odegaard", "saka", "calle"]):
+        return 4 * 3600   # 伤病：4小时
+    if any(x in kw for x in ["result", "score", " win ", " lose ", " draw ", " beat", "victory", "defeat"]):
+        return 6 * 3600   # 赛果：6小时
+    if any(x in kw for x in ["preview", "lineup", "team news", "starting"]):
+        return 6 * 3600   # 预览：6小时
+    if any(x in kw for x in ["transfer", "sign", "bid", "offer", "contract"]):
+        return 12 * 3600  # 转会：12小时
+    if any(x in kw for x in ["press conference", "arteta", "presser"]):
+        return 8 * 3600    # 发布会：8小时
+    return 6 * 3600       # 默认：6小时
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -91,6 +107,62 @@ def _tavily_search(
     return response.json()
 
 
+def _tavily_search_cached(
+    api_key: str,
+    keyword: str,
+    max_results: int,
+    include_domains: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    带缓存的 Tavily 搜索。
+    优先读缓存（按关键词类型设 TTL），未命中则调 API 并写入缓存。
+    """
+    import hashlib, json
+    from pathlib import Path
+    from datetime import datetime, timezone
+
+    CACHE_DIR = Path("output/cache/search")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 生成缓存 key
+    domains_str = ",".join(sorted(include_domains or []))
+    key_data = f"{api_key}:{keyword}:{max_results}:{domains_str}"
+    cache_key = hashlib.sha256(key_data.encode()).hexdigest()[:20]
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+
+    ttl = _keyword_ttl(keyword)
+
+    # 读缓存
+    if cache_file.exists():
+        try:
+            entry = json.loads(cache_file.read_text(encoding="utf-8"))
+            cached_at = datetime.fromisoformat(entry["cached_at"])
+            if cached_at.tzinfo is None:
+                cached_at = cached_at.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+            if age <= ttl:
+                logger.info(f"🔵 缓存命中 [{keyword[:40]}] (TTL={ttl//3600}h)")
+                return entry["data"]
+        except (json.JSONDecodeError, KeyError, ValueError):
+            pass
+
+    # 未命中，调 API
+    data = _tavily_search(api_key, keyword, max_results, include_domains)
+
+    # 写缓存
+    try:
+        entry = {
+            "data": data,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "ttl": ttl,
+        }
+        cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.warning("缓存写入失败: %s", cache_key)
+
+    return data
+
+
 def search_news(config: dict[str, Any]) -> list[dict[str, Any]]:
     api_key = config["tavily"]["api_key"]
     all_domains = _collect_all_domains(config)
@@ -106,7 +178,7 @@ def search_news(config: dict[str, Any]) -> list[dict[str, Any]]:
 
         include_domains = all_domains if spec["restrict_to_sources"] else None
         try:
-            data = _tavily_search(api_key, keyword, spec["max_results"], include_domains)
+            data = _tavily_search_cached(api_key, keyword, spec["max_results"], include_domains)
         except Exception:
             logger.exception("搜索失败: %s", keyword)
             continue
