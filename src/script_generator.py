@@ -19,7 +19,13 @@ QA_BANNED_TERMS = {
 }
 
 
-def generate_script(articles: list[dict[str, Any]], config: dict[str, Any]) -> str:
+def generate_script(
+    articles: list[dict[str, Any]],
+    config: dict[str, Any],
+    recording_date: str = None,
+    recording_weekday: str = None,
+    recording_time: str = None,
+) -> str:
     # 球员名称标准化（英文/昵称 → 标准中文名）
     from src.arsenal_knowledge import normalize_articles
     articles = normalize_articles(articles)
@@ -34,8 +40,15 @@ def generate_script(articles: list[dict[str, Any]], config: dict[str, Any]) -> s
     host_name = host_config.get("name", "主播")
     show_name = podcast_config.get("title", "北伦敦24小时")
 
+    # 使用传入的北京时间，若未传则用当前时间（兜底）
+    _date = recording_date or datetime.now().strftime("%Y年%m月%d日")
+    _weekday = recording_weekday or ""
+    _time = recording_time or ""
+
     prompt = template.format(
-        date=datetime.now().strftime("%Y年%m月%d日"),
+        date=_date,
+        weekday=_weekday,
+        recording_time=_time,
         articles=_build_articles_text(articles, config),
         match_mode=_detect_match_mode(articles),
         min_words=min_words,

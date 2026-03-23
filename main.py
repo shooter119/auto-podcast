@@ -4,7 +4,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,6 +14,13 @@ from src.run_state import create_run_context, load_state, mark_step, save_state
 load_dotenv(Path(__file__).parent / ".env")
 
 logger = logging.getLogger("auto-podcast")
+
+# 北京时间（UTC+8）
+BEIJING = timezone(timedelta(hours=8))
+
+def now_bj():
+    """返回当前北京时间"""
+    return datetime.now(timezone.utc).astimezone(BEIJING)
 
 PROJECT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = PROJECT_DIR / "config.yaml"
@@ -98,12 +105,12 @@ def main():
     config = load_config(args.config)
     state = load_state(context)
     state["run_id"] = context.run_id
-    state["started_at"] = state.get("started_at") or datetime.now().isoformat()
+    state["started_at"] = state.get("started_at") or now_bj().isoformat()
     save_state(context, state)
 
-    today = datetime.now().strftime("%Y年%m月%d日")
-    timestamp_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
-    date_tag = datetime.now().strftime("%Y%m%d")
+    today = now_bj().strftime("%Y年%m月%d日")
+    timestamp_tag = now_bj().strftime("%Y%m%d_%H%M%S")
+    date_tag = now_bj().strftime("%Y%m%d")
 
     results = None
     articles = None
@@ -204,8 +211,22 @@ def main():
             logger.info("步骤5/8: 生成播客脚本...")
             from src.script_generator import generate_script
 
-            script = generate_script(articles, config)
-            context.script_path.write_text(script, encoding="utf-8")
+            # 中文星期映射
+            weekday_cn = {"Monday": "星期一", "Tuesday": "星期二", "Wednesday": "星期三",
+                          "Thursday": "星期四", "Friday": "星期五", "Saturday": "星期六", "Sunday": "星期日"}.get(
+                now_bj().strftime("%A"), now_bj().strftime("%A"))
+
+            script = generate_script(
+                articles,
+                config,
+                recording_date=today,
+                recording_weekday=weekday_cn,
+                recording_time=now_bj().strftime("%H:%M"),
+            )
+            # 追加录制时间说明（TTS会读出）
+            recording_note = f"\n\n【本节目录制于北京时间 {today} {weekday_cn} {now_bj().strftime('%H:%M')}，内容覆盖当日最新阿森纳及英超动态。】\n"
+            script_with_note = script + recording_note
+            context.script_path.write_text(script_with_note, encoding="utf-8")
             mark_step(
                 context,
                 state,
@@ -276,7 +297,26 @@ def main():
             audio_duration = get_audio_duration(audio_path)
             episode_id = f"{config['podcast']['title']}:{context.run_id}"
             episode_title = f"{config['podcast']['title']} - {today}"
-            episode_desc = f"{today}的阿森纳新闻播报，共{len(articles) if articles else '?'}条新闻。run_id={context.run_id}"
+            # 从脚本正文提取前200字作为RSS description（去除末尾的录制说明行）
+            def _make_description(text: str, max_chars: int = 200) -> str:
+                if not text:
+                    return ""
+                # 去掉末尾的录制说明行
+                marker = "【本节目录制于"
+                if marker in text:
+                    text = text[:text.find(marker)]
+                excerpt = text[:max_chars].rstrip()
+                for punct in ("。", "！", "？", "；"):
+                    idx = excerpt.rfind(punct)
+                    if idx > max_chars * 0.6:
+                        return excerpt[:idx + 1]
+                return excerpt + "…"
+
+            script_text = ""
+            if script_path and script_path.exists():
+                script_text = script_path.read_text(encoding="utf-8")
+            desc_excerpt = _make_description(script_text)
+            episode_desc = f"{today}的阿森纳新闻播报，共{len(articles) if articles else '?'}条新闻。{desc_excerpt}"
 
             feed_xml = build_feed_xml(
                 episode_id,
@@ -297,7 +337,7 @@ def main():
                 metrics={"audio_duration_seconds": audio_duration},
             )
 
-        state["finished_at"] = datetime.now().isoformat()
+        state["finished_at"] = now_bj().isoformat()
         save_state(context, state)
         logger.info("=== 北伦敦24小时 · 播客生成完成 ===")
         if audio_url:
