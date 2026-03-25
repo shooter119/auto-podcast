@@ -81,19 +81,24 @@ def _classify_article(article: dict[str, Any], config: dict[str, Any]) -> tuple[
     arsenal_hits = sum(1 for keyword in ARSENAL_KEYWORDS if keyword in text)
     rival_hits = sum(1 for keyword in RIVAL_KEYWORDS if keyword in text)
 
+    # 必须真正包含 Arsenal 关键词，才算 arsenal_core
     if arsenal_hits >= 1 and football_hits >= 1:
         score = 0.8 + min(arsenal_hits * 0.08, 0.15) + min(football_hits * 0.02, 0.05)
         return min(score, 0.99), "arsenal_core", f"阿森纳强相关（阿森纳词 {arsenal_hits}，足球词 {football_hits}）"
 
+    # arsenal_core 组搜出来的文章，如果没有 Arsenal 关键词 → 降级为 league_tail
     if article.get("group") == "arsenal_core" and football_hits >= 1:
-        return 0.76, "arsenal_core", "阿森纳核心检索命中"
+        score = 0.42 + min(arsenal_hits * 0.02, 0.05)
+        return score, "league_tail", f"arsenal_core检索但无阿森纳关键词，降级为联赛补充"
 
+    # 必须真正包含竞争对手关键词，才算 league_tail
     if rival_hits >= 1 and football_hits >= 1:
         score = 0.55 + min(rival_hits * 0.06, 0.12)
         return min(score, 0.75), "league_tail", f"争冠或竞争对手相关（对手词 {rival_hits}）"
 
-    if article.get("group") in {"rivals", "league"} and football_hits >= 2:
-        return 0.52, "league_tail", f"{article.get('group')} 分组且足球上下文充分"
+    # rivals/league 组搜出来的文章，必须同时有竞争对手关键词才过
+    if article.get("group") in {"rivals", "league"} and rival_hits >= 1 and football_hits >= 1:
+        return 0.52, "league_tail", f"{article.get('group')} 分组且含竞争对手关键词"
 
     return 0.0, "drop", "足球相关性不足"
 
